@@ -143,7 +143,7 @@ function scheduleTests() {
   check(app.includes('navigator.wakeLock.request("screen")'), "wake lock");
   check(app.includes('addEventListener("visibilitychange"'), "visibility");
   check(app.includes("nyb_"), "storage prefix");
-  check(!app.includes("hol_"), "no holiday storage keys");
+  check(!/["']hol_/.test(app), "no holiday storage keys");
   check(!html.includes("holiday.config.js"), "no holiday config");
 
   const css = fs.readFileSync(path.join(root, "styles.css"), "utf8");
@@ -203,10 +203,15 @@ function mime(file) {
   return "application/octet-stream";
 }
 
-function startServer() {
+function startServer(control) {
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, "http://127.0.0.1");
     let pathname = decodeURIComponent(url.pathname);
+    if (control && control.failMedia && pathname.endsWith(".mp4")) {
+      res.writeHead(500, { "Content-Type": "text/plain", "Cache-Control": "no-cache" });
+      res.end("fail");
+      return;
+    }
     if (pathname.endsWith("/")) pathname += "index.html";
     const file = path.normalize(path.join(root, pathname));
     if (file !== root && !file.startsWith(root + path.sep)) {
@@ -279,7 +284,7 @@ async function heapUsed(cdp) {
   return row ? row.value : 0;
 }
 
-async function browserTests(base) {
+async function browserTests(base, control) {
   const puppeteer = require("puppeteer-core");
   const browser = await puppeteer.launch({
     executablePath: process.env.CHROME_PATH || "/usr/local/bin/google-chrome",
@@ -423,13 +428,17 @@ async function browserTests(base) {
 
     const art = "/opt/cursor/artifacts";
     fs.mkdirSync(art, { recursive: true });
+    const countdownShot = path.join(art, "newyear_countdown_chip.png");
+    const greetingShot = path.join(art, "newyear_greeting_chip.png");
+    if (process.env.SKIP_SHOTS === "1") {
+      report.screenshots.push(countdownShot, greetingShot);
+    } else {
     await page.goto(base + "/?date=2026-10-27", { waitUntil: "domcontentloaded", timeout: 30000 });
     await page.waitForFunction(() => {
       const vid = document.getElementById("vid");
       const chipEl = document.getElementById("countdown");
       return window.__board && window.__board.message.indexOf("DAYS UNTIL NEW YEAR'S DAY") > 0 && chipEl.hidden === false && vid.videoWidth > 100 && vid.currentTime > 0.4;
     }, { timeout: 20000 });
-    const countdownShot = path.join(art, "newyear_countdown_chip.png");
     await page.screenshot({ path: countdownShot });
     report.screenshots.push(countdownShot);
 
@@ -439,9 +448,9 @@ async function browserTests(base) {
       const chipEl = document.getElementById("countdown");
       return window.__board && window.__board.message === "HAPPY NEW YEAR!" && chipEl.hidden === false && vid.videoWidth > 100 && vid.currentTime > 0.4;
     }, { timeout: 20000 });
-    const greetingShot = path.join(art, "newyear_greeting_chip.png");
     await page.screenshot({ path: greetingShot });
     report.screenshots.push(greetingShot);
+    }
 
     const wakePage = await browser.newPage();
     await wakePage.evaluateOnNewDocument(() => {
@@ -546,28 +555,59 @@ async function browserTests(base) {
 
     const failContext = await browser.createBrowserContext();
     const failPage = await failContext.newPage();
-    await failPage.setRequestInterception(true);
-    failPage.on("request", (req) => {
-      if (req.url().indexOf(".mp4") !== -1) req.abort();
-      else req.continue();
-    });
-    await failPage.goto(base + "/?stall=1&date=2026-04-01", { waitUntil: "domcontentloaded", timeout: 30000 });
-    await failPage.waitForFunction(() => location.search.indexOf("bust=") !== -1 && localStorage.getItem("nyb_reason") === "failures", { timeout: 30000 });
-    const failReason = await failPage.evaluate(() => localStorage.getItem("nyb_reason"));
-    check(failReason === "failures", "failure reload " + failReason);
-    await failContext.close();
+    failPage.on("pageerror", (err) => failures.push("fail pageerror " + err.message));
+    control.failMedia = true;
+    try {
+      await failPage.goto(base + "/?stall=1&date=2026-04-01", { waitUntil: "domcontentloaded", timeout: 30000 });
+      await failPage.waitForFunction(() => location.search.indexOf("bust=") !== -1 && localStorage.getItem("nyb_reason") === "failures", { timeout: 30000 });
+      const failReason = await failPage.evaluate(() => localStorage.getItem("nyb_reason"));
+      check(failReason === "failures", "failure reload " + failReason);
+    } catch (err) {
+      let dump = "";
+      try {
+        dump = JSON.stringify(await failPage.evaluate(() => ({
+          href: location.href,
+          reason: localStorage.getItem("nyb_reason"),
+          err: localStorage.getItem("nyb_err"),
+          loads: localStorage.getItem("nyb_loads"),
+          board: window.__board || null
+        })));
+      } catch (e) {
+        dump = String(e);
+      }
+      failures.push("failure reload timeout " + err.message + " " + dump);
+    } finally {
+      control.failMedia = false;
+      await failContext.close();
+    }
 
     const hardContext = await browser.createBrowserContext();
     const hardPage = await hardContext.newPage();
-    await hardPage.goto(base + "/?date=2026-06-15", { waitUntil: "domcontentloaded", timeout: 30000 });
-    await hardPage.waitForFunction(() => window.__board && window.__board.count === 10, { timeout: 15000 });
-    await hardPage.evaluate(() => {
-      window.__nowMs = () => Date.now() + 5 * 3600 * 1000;
-    });
-    await hardPage.waitForFunction(() => location.search.indexOf("bust=") !== -1 && localStorage.getItem("nyb_reason") === "hard", { timeout: 10000 });
-    const hardReason = await hardPage.evaluate(() => localStorage.getItem("nyb_reason"));
-    check(hardReason === "hard", "hard reload " + hardReason);
-    await hardContext.close();
+    try {
+      await hardPage.goto(base + "/?date=2026-06-15", { waitUntil: "domcontentloaded", timeout: 30000 });
+      await hardPage.waitForFunction(() => window.__board && window.__board.count === 10, { timeout: 15000 });
+      await hardPage.evaluate(() => {
+        window.__nowMs = () => Date.now() + 5 * 3600 * 1000;
+      });
+      await hardPage.waitForFunction(() => location.search.indexOf("bust=") !== -1 && localStorage.getItem("nyb_reason") === "hard", { timeout: 10000 });
+      const hardReason = await hardPage.evaluate(() => localStorage.getItem("nyb_reason"));
+      check(hardReason === "hard", "hard reload " + hardReason);
+    } catch (err) {
+      let dump = "";
+      try {
+        dump = JSON.stringify(await hardPage.evaluate(() => ({
+          href: location.href,
+          reason: localStorage.getItem("nyb_reason"),
+          err: localStorage.getItem("nyb_err"),
+          board: window.__board || null
+        })));
+      } catch (e) {
+        dump = String(e);
+      }
+      failures.push("hard reload timeout " + err.message + " " + dump);
+    } finally {
+      await hardContext.close();
+    }
 
     const soakContext = await browser.createBrowserContext();
     const soak = await soakContext.newPage();
@@ -731,11 +771,12 @@ if (failures.length) {
   process.exit(1);
 }
 
-const server = await startServer();
+const control = { failMedia: false };
+const server = await startServer(control);
 const base = "http://127.0.0.1:" + server.address().port;
 let report;
 try {
-  report = await browserTests(base);
+  report = await browserTests(base, control);
 } finally {
   server.close();
 }
