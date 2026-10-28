@@ -24,10 +24,8 @@ function days(from, to) {
   return Math.round((Date.UTC(y2, m2 - 1, d2) - Date.UTC(y1, m1 - 1, d1)) / 86400000);
 }
 
-function chip(from, to) {
-  const n = days(from, to);
-  if (n === 1) return "1 DAY UNTIL NEW YEAR'S DAY";
-  return n + " DAYS UNTIL NEW YEAR'S DAY";
+function chip(from) {
+  return board.messageFor(board.parseISODate(from)).message;
 }
 
 function nyPartsFromIso(iso) {
@@ -59,7 +57,7 @@ const cases = [
 
 function expectedMessage(row) {
   if (row.message) return row.message;
-  return chip(row.date, row.until);
+  return chip(row.date);
 }
 
 function assertResolved(row, got, where) {
@@ -69,6 +67,9 @@ function assertResolved(row, got, where) {
   check(got.mode === row.mode, tag + " mode " + got.mode + " !== " + row.mode);
   check(got.message === message, tag + " message [" + got.message + "] !== [" + message + "]");
   check(got.days === expectDays, tag + " days " + got.days + " !== " + expectDays);
+  if (row.mode === "countdown") {
+    check(/^\d+D \d{2}H \d{2}M \d{2}S UNTIL NEW YEAR'S$/.test(got.message), tag + " format " + got.message);
+  }
   if (got.clips) check(got.clips.length === 10, tag + " clip count " + got.clips.length);
   if (got.src) {
     check(String(got.src).indexOf("clips/ny") !== -1, tag + " playing " + got.src);
@@ -102,6 +103,25 @@ function scheduleTests() {
   for (const row of cases) {
     assertResolved(row, board.messageFor(board.parseISODate(row.date)), "node");
   }
+
+  const at = (iso) => board.messageAt(Date.parse(iso));
+  const nye = at("2027-01-01T05:00:00.000Z");
+  check(nye.mode === "greeting" && nye.message === "HAPPY NEW YEAR!", "ny midnight greeting " + nye.message);
+  const oneSec = at("2027-01-01T04:59:59.000Z");
+  check(oneSec.message === "0D 00H 00M 01S UNTIL NEW YEAR'S", "one second left " + oneSec.message);
+  const dec31 = at("2026-12-31T05:00:00.000Z");
+  check(dec31.message === "1D 00H 00M 00S UNTIL NEW YEAR'S" && dec31.days === 1, "dec 31 midnight " + dec31.message);
+  const dec31s = at("2026-12-31T05:00:01.000Z");
+  check(dec31s.message === "0D 23H 59M 59S UNTIL NEW YEAR'S", "dec 31 plus 1s " + dec31s.message);
+  const jan2late = at("2027-01-03T04:59:59.000Z");
+  check(jan2late.mode === "greeting" && jan2late.message === "HAPPY NEW YEAR!", "jan 2 still greets " + jan2late.message);
+  const jan3 = at("2027-01-03T05:00:00.000Z");
+  const jan3Left = Date.parse("2028-01-01T05:00:00.000Z") - Date.parse("2027-01-03T05:00:00.000Z");
+  check(jan3.mode === "countdown" && jan3.days === Math.floor(jan3Left / 86400000) && jan3.hours === 0, "jan 3 rolls " + jan3.message);
+  const oct = at("2026-10-27T04:00:00.000Z");
+  const octLeft = Date.parse("2027-01-01T05:00:00.000Z") - Date.parse("2026-10-27T04:00:00.000Z");
+  check(oct.days === Math.floor(octLeft / 86400000) && oct.hours === Math.floor((octLeft % 86400000) / 3600000) && oct.minutes === 0 && oct.seconds === 0, "edt extra hour " + JSON.stringify(oct));
+  check(board.wallClockUtc(2027, 1, 1, 0, 0, 0) === Date.parse("2027-01-01T05:00:00.000Z"), "jan 1 is 05:00 UTC");
   check(board.parseISODate("2026-02-31") === null, "reject Feb 31");
   check(board.parseISODate("2026-13-01") === null, "reject month 13");
   check(board.parseISODate("nope") === null, "reject bad date");
@@ -339,7 +359,7 @@ async function browserTests(base, control) {
     }
 
     const styled = await openBoard("?date=2026-10-27");
-    check(styled.message === chip("2026-10-27", "2027-01-01"), "style page message");
+    check(styled.message === chip("2026-10-27"), "style page message");
     const css = await page.evaluate(() => {
       const vid = document.getElementById("vid");
       const chipEl = document.getElementById("countdown");
@@ -363,7 +383,7 @@ async function browserTests(base, control) {
         chipFilter: cs.backdropFilter || cs.webkitBackdropFilter || "none",
         chipFont: cs.fontSize,
         controlsVisibility: getComputedStyle(controls).visibility,
-        rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, height: rect.height },
+        rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height },
         ids: [...stage.children].map((el) => el.id)
       };
     });
@@ -377,11 +397,25 @@ async function browserTests(base, control) {
     check(!css.chipTransition || css.chipTransition.indexOf("0s") === 0, "chip transition " + css.chipTransition);
     check(css.chipShadow === "none", "chip shadow " + css.chipShadow);
     check(!css.chipFilter || css.chipFilter === "none", "chip backdrop " + css.chipFilter);
-    check(css.chipFont === "18px", "chip font " + css.chipFont);
+    check(css.chipFont === "22px", "chip font " + css.chipFont);
     check(css.controlsVisibility === "hidden", "controls visible");
-    check(css.rect.top < 40 && css.rect.left < 40, "chip corner " + JSON.stringify(css.rect));
-    check(css.rect.height < 50 && css.rect.right < 800, "chip small " + JSON.stringify(css.rect));
+    check(css.rect.top >= 10 && css.rect.top <= 24, "chip top " + JSON.stringify(css.rect));
+    check(css.rect.right >= 1890 && css.rect.right <= 1910, "chip right " + JSON.stringify(css.rect));
+    check(css.rect.left > 1300 && css.rect.width <= 480 && css.rect.height <= 48, "chip compact " + JSON.stringify(css.rect));
     check(css.ids.join(",") === "vid,countdown,counter,controls", "stage children " + css.ids.join(","));
+    const fit = await page.evaluate(() => {
+      const el = document.getElementById("countdown");
+      const prev = el.textContent;
+      el.textContent = "364D 23H 59M 59S UNTIL NEW YEAR'S";
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const textW = range.getBoundingClientRect().width;
+      const cs = getComputedStyle(el);
+      const inner = el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      el.textContent = prev;
+      return { textW: textW, inner: inner };
+    });
+    check(fit.textW > 0 && fit.textW <= fit.inner + 0.5, "chip text fits " + JSON.stringify(fit));
 
     const loadsBefore = await page.evaluate(() => Number(localStorage.getItem("nyb_loads") || 0));
     const srcBefore = styled.src;
@@ -398,9 +432,28 @@ async function browserTests(base, control) {
       window.__recheck();
     });
     flipped = await page.evaluate(() => window.__board);
-    check(flipped.mode === "countdown" && flipped.message === chip("2027-01-03", "2028-01-01"), "recheck Jan 3 " + flipped.message);
+    check(flipped.mode === "countdown" && flipped.message === board.messageFor({ y: 2027, m: 1, d: 3 }).message, "recheck Jan 3 " + flipped.message);
     const loadsAfter = await page.evaluate(() => Number(localStorage.getItem("nyb_loads") || 0));
     check(loadsAfter === loadsBefore, "recheck reloaded the page");
+
+    const tickPage = await browser.newPage();
+    await tickPage.setViewport({ width: 1920, height: 1080, deviceScaleFactor: 1 });
+    await tickPage.goto(base + "/", { waitUntil: "domcontentloaded", timeout: 30000 });
+    await tickPage.waitForFunction(() => window.__board && /^\d+D \d{2}H \d{2}M \d{2}S UNTIL NEW YEAR'S$/.test(window.__board.message), { timeout: 15000 });
+    const ticking = await tickPage.evaluate(() => {
+      const el = document.getElementById("countdown");
+      const box = el.getBoundingClientRect();
+      return { message: window.__board.message, left: box.left, top: box.top, width: box.width, height: box.height };
+    });
+    await new Promise((resolve) => setTimeout(resolve, 1600));
+    const ticked = await tickPage.evaluate(() => {
+      const el = document.getElementById("countdown");
+      const box = el.getBoundingClientRect();
+      return { message: window.__board.message, left: box.left, top: box.top, width: box.width, height: box.height };
+    });
+    check(ticked.message !== ticking.message, "countdown ticks " + ticking.message + " -> " + ticked.message);
+    check(ticked.left === ticking.left && ticked.top === ticking.top && ticked.width === ticking.width && ticked.height === ticking.height, "chip box stays put");
+    await tickPage.close();
 
     const zoneCases = [
       "2026-01-01T04:59:00Z",
@@ -421,7 +474,7 @@ async function browserTests(base, control) {
       await zonePage.goto(base + "/", { waitUntil: "domcontentloaded", timeout: 30000 });
       await zonePage.waitForFunction(() => window.__board && window.__board.message, { timeout: 15000 });
       const got = await zonePage.evaluate(() => window.__board.message);
-      const expect = board.messageFor(nyPartsFromIso(iso)).message;
+      const expect = board.messageAt(Date.parse(iso)).message;
       check(got === expect, "zone " + iso + " [" + got + "] !== [" + expect + "]");
       await zonePage.close();
     }
@@ -437,7 +490,7 @@ async function browserTests(base, control) {
     await page.waitForFunction(() => {
       const vid = document.getElementById("vid");
       const chipEl = document.getElementById("countdown");
-      return window.__board && window.__board.message.indexOf("DAYS UNTIL NEW YEAR'S DAY") > 0 && chipEl.hidden === false && vid.videoWidth > 100 && vid.currentTime > 0.4;
+      return window.__board && window.__board.message.indexOf("UNTIL NEW YEAR'S") > 0 && chipEl.hidden === false && vid.videoWidth > 100 && vid.currentTime > 0.4;
     }, { timeout: 20000 });
     await page.screenshot({ path: countdownShot });
     report.screenshots.push(countdownShot);

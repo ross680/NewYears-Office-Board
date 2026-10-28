@@ -1,6 +1,6 @@
 # 3R New Year's Office TV
 
-Static GitHub Pages board for the office TV at 3R Plumbing & Mechanical. Ten silent 15-second clips play in a loop, and a small countdown chip sits in the corner.
+Static GitHub Pages board for the office TV at 3R Plumbing & Mechanical. Ten silent 15-second clips play in a loop, and a small countdown chip sits in the top-right corner.
 
 The TV opens <https://ross680.github.io/NewYears-Office-Board/>.
 
@@ -8,15 +8,14 @@ The player is the single-playlist form of the [Holiday Office Board](https://git
 
 ## Countdown
 
-The chip uses the calendar date in America/New_York. It is opaque, it does not animate, and it stays up while the clips play.
+The chip is a fixed-size opaque box in the top-right, so the digits can tick without moving the layout or covering the copy on the left of each clip. It does not animate. The clock is America/New_York even if the TV is set to another timezone. It counts down to the next January 1 at 12:00 AM Eastern, in days, hours, minutes, and seconds.
 
 | When | Chip |
 | --- | --- |
 | January 1 and January 2 | `HAPPY NEW YEAR!` |
-| December 31 | `1 DAY UNTIL NEW YEAR'S DAY` |
-| Any other day | `N DAYS UNTIL NEW YEAR'S DAY`, counted to the next January 1 |
+| Any other moment | `64D 05H 12M 08S UNTIL NEW YEAR'S`, live, to the next January 1 |
 
-The date is read again every time the page loads, including the scheduled reload, and once a minute so midnight Eastern updates the chip on that tick. `?date=YYYY-MM-DD` pretends today is that America/New_York calendar day.
+January 3 rolls the count to the following New Year. The chip shares the board's one playback timer. It is read again on every page load, including the scheduled reload. `?date=YYYY-MM-DD` freezes the chip at 12:00 AM Eastern on that calendar day.
 
 ## Publish on GitHub Pages
 
@@ -64,7 +63,7 @@ The ten clips are shuffled when the board starts and again when the cycle wraps.
 2. Change the `?v=` text on that line to the first 10 hex characters of the new file's SHA-256. Leave `?v=` alone when the bytes did not change, or the TV downloads the clip again for no reason.
 3. Commit and push to `main`.
 
-`app.js`, `styles.css`, and `board.config.js` are linked with `?v=20261027a`. Bump that text in `index.html` and the matching shell list in `sw.js` when you change those files so the TV does not keep an old copy.
+`app.js`, `styles.css`, and `board.config.js` are linked with `?v=20261028a`. Bump that text in `index.html` and the matching shell list in `sw.js` when you change those files so the TV does not keep an old copy.
 
 ## Keeping the picture moving
 
@@ -72,7 +71,7 @@ One `<video>` element in the page is reused. Each clip is detached (`pause`, cle
 
 If `play()` is rejected, the board mutes and tries once more, then skips. Listeners and timers are registered once for the life of the page, not once per clip.
 
-Nothing translucent is painted over the video. The page background is black. The video uses `object-fit: contain`. The countdown chip is a small static opaque label. The screen wake lock is requested where the browser allows it, and requested again when the page becomes visible.
+Nothing translucent is painted over the video. The page background is black. The video uses `object-fit: contain`. The countdown chip is a small fixed-size opaque label. The screen wake lock is requested where the browser allows it, and requested again when the page becomes visible.
 
 A service worker caches the page and the clips. After the TV has loaded them once, a network drop keeps the playlist playing from that cache. Saved resume state uses its own `nyb_` keys so it does not collide with the other office boards on the same `github.io` origin.
 
@@ -95,4 +94,4 @@ If the picture is still black, use `-profile:v baseline -level:v 4.0 -bf 0` in p
 
 ## Tests
 
-`npm test` checks the countdown (January 1–2, the days around it, and the New York midnight boundary), the `?date=` override, and a headless Chrome soak across many clip ends. The soak checks that the video element count, DOM size, listener count, and JS heap stay flat, and it prints `getVideoPlaybackQuality` dropped frames for the clips that played at 1x.
+`npm test` checks the countdown (January 1–2, the live Eastern clock, the days around it, and the New York midnight boundary), the `?date=` override, and a headless Chrome soak across many clip ends. The soak checks that the video element count, DOM size, listener count, and JS heap stay flat, and it prints `getVideoPlaybackQuality` dropped frames for the clips that played at 1x.
