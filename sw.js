@@ -12,9 +12,9 @@ var PREFIX = "newyears-board-";
 var SHELL = [
   "./",
   "./index.html",
-  "./board.config.js?v=20261027a",
-  "./styles.css?v=20261027a",
-  "./app.js?v=20261027a"
+  "./board.config.js?v=20261028a",
+  "./styles.css?v=20261028a",
+  "./app.js?v=20261028a"
 ];
 
 function stableRequest(request) {

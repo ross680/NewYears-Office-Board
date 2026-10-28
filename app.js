@@ -2,9 +2,9 @@
   // Office TV board for New Year's. One <video> plays the single playlist in
   // board.config.js. One off-document warmer preloads the next file and is
   // aborted (src cleared, load()) before it is reused. Listeners and timers are
-  // created once. A stuck or broken clip is skipped. The countdown chip is
-  // resolved on load (including the 4-hour reload) and again each minute, so
-  // midnight America/New_York updates the label on that tick.
+  // created once. A stuck or broken clip is skipped. The countdown chip shares
+  // the one playback interval. It ticks in America/New_York and is resolved
+  // again from the clock on each load, including the scheduled reload.
   const params = new URLSearchParams(location.search);
   const schedule = window.NewYearBoard;
 
@@ -77,7 +77,6 @@
   let armTimer = 0;
   let failTimer = 0;
   let idleTimer = 0;
-  let countdownTimer = 0;
   let cacheAsked = false;
   const booted = Date.now();
   const reloadAt = reloadHours > 0 ? booted + reloadHours * HOUR_MS : 0;
@@ -108,52 +107,40 @@
     return parts[parts.length - 1] || src || "clip";
   }
 
-  function nyParts(date) {
-    try {
-      const fmt = new Intl.DateTimeFormat("en-US", {
-        timeZone: "America/New_York",
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit"
-      });
-      const bits = fmt.formatToParts(date);
-      const grab = (type) => {
-        for (let n = 0; n < bits.length; n++) {
-          if (bits[n].type === type) return Number(bits[n].value);
-        }
-        return 0;
-      };
-      return { y: grab("year"), m: grab("month"), d: grab("day") };
-    } catch (e) {
-      return { y: date.getFullYear(), m: date.getMonth() + 1, d: date.getDate() };
-    }
-  }
-
-  function activeParts() {
+  // __parts and ?date= freeze a calendar day at 12:00 AM Eastern so a preview
+  // stays put. The TV itself (no override) uses the live clock.
+  function countdownInstant() {
     try {
       if (typeof window.__parts === "function") {
         const hooked = window.__parts();
-        if (hooked && hooked.y && hooked.m && hooked.d) return hooked;
+        if (hooked && hooked.y && hooked.m && hooked.d) {
+          const hh = hooked.hh == null ? 0 : hooked.hh;
+          const mm = hooked.mm == null ? 0 : hooked.mm;
+          const ss = hooked.ss == null ? 0 : hooked.ss;
+          return schedule.wallClockUtc(hooked.y, hooked.m, hooked.d, hh, mm, ss);
+        }
       }
     } catch (e) {}
     const raw = params.get("date");
     if (raw && schedule) {
       const parsed = schedule.parseISODate(raw);
-      if (parsed) return parsed;
+      if (parsed) return schedule.wallClockUtc(parsed.y, parsed.m, parsed.d, 0, 0, 0);
     }
-    return nyParts(nowDate());
+    return nowDate().getTime();
+  }
+
+  function resolveMessage() {
+    if (!schedule) return { mode: "empty", days: 0, message: "" };
+    return schedule.messageAt(countdownInstant());
   }
 
   function currentResolved() {
-    if (!schedule) {
-      return { mode: "empty", days: 0, message: "", clips: [] };
-    }
-    const msg = schedule.messageFor(activeParts());
+    const msg = resolveMessage();
     return {
       mode: msg.mode,
       days: msg.days,
       message: msg.message,
-      clips: schedule.CONFIG.clips.slice()
+      clips: schedule ? schedule.CONFIG.clips.slice() : []
     };
   }
 
@@ -164,6 +151,17 @@
       countdown.textContent = text;
     }
     countdown.hidden = !text;
+  }
+
+  // Same text skips the DOM write, so a ticking second that has not changed
+  // and a frozen ?date= preview do not touch layout.
+  function refreshCountdown() {
+    if (!schedule) return;
+    const msg = resolveMessage();
+    const text = msg && msg.message ? msg.message : "";
+    if (text === lastMessage) return;
+    paintChip(msg);
+    publish();
   }
 
   function publish() {
@@ -538,11 +536,13 @@
       return;
     }
     wake();
+    refreshCountdown();
     if (!paused && expectedSrc && vid.paused && !reloading) playClip();
   }
 
   function tick() {
     if (reloading) return;
+    refreshCountdown();
     if (hardAt && clock() >= hardAt) {
       safeReload("hard");
       return;
@@ -621,20 +621,14 @@
     return 0;
   }
 
-  // Called on load and once a minute. The playlist stays. Only the chip changes.
+  // The playlist stays. Only the chip changes. The playback interval calls
+  // refreshCountdown; this hook is for a forced read (tests, ?date= flips).
   function recheck() {
-    const resolved = currentResolved();
     window.__rechecks = (window.__rechecks || 0) + 1;
+    if (!schedule) return;
+    const resolved = currentResolved();
     paintChip(resolved);
     publish();
-  }
-
-  // Once a minute, just after the clock minute, so midnight America/New_York
-  // updates the chip on that tick instead of on a drifting multi-hour timer.
-  function scheduleRecheck() {
-    recheck();
-    const delay = 60000 - (Date.now() % 60000) + 40;
-    countdownTimer = setTimeout(scheduleRecheck, delay);
   }
 
   window.__recheck = recheck;
@@ -647,7 +641,6 @@
     }
     const resolved = currentResolved();
     installPlaylist(resolved, store.get("nyb_last") || "");
-    scheduleRecheck();
     wake();
     document.addEventListener("visibilitychange", onVisible);
     setInterval(tick, 500);

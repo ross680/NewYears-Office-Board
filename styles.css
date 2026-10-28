@@ -4,15 +4,16 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000;color-
 body{font-family:Arial,Helvetica,sans-serif;color:var(--cream)}
 #stage{position:fixed;inset:0;cursor:none;background:#000}
 #vid{position:absolute;inset:0;z-index:2;width:100%;height:100%;object-fit:contain;background:#000;opacity:1;user-select:none;-webkit-user-drag:none}
-#countdown{position:absolute;left:20px;top:16px;z-index:5;padding:7px 12px;border:1px solid var(--gold);border-radius:6px;background:#1a0c0c;color:var(--cream);font-size:18px;font-weight:800;letter-spacing:.05em;line-height:1.2;text-transform:uppercase;white-space:nowrap;pointer-events:none;opacity:1;animation:none;transition:none;backdrop-filter:none;box-shadow:none;user-select:none}
+#countdown{position:absolute;right:20px;top:16px;z-index:5;box-sizing:border-box;width:464px;height:48px;padding:0 12px;display:flex;align-items:center;justify-content:flex-end;text-align:right;border:1px solid var(--gold);border-radius:6px;background:#1a0c0c;color:var(--cream);font-size:22px;font-weight:800;letter-spacing:.01em;line-height:1;font-variant-numeric:tabular-nums;text-transform:uppercase;white-space:nowrap;overflow:hidden;pointer-events:none;opacity:1;animation:none;transition:none;backdrop-filter:none;box-shadow:none;user-select:none}
 #countdown[hidden]{display:none}
-#counter{position:absolute;right:18px;top:14px;z-index:5;padding:7px 10px;border:1px solid var(--gold);border-radius:7px;background:#1a0c0c;color:var(--gold);font-size:13px;font-weight:700;letter-spacing:.08em;visibility:hidden}
+#counter{position:absolute;right:20px;top:74px;z-index:5;padding:7px 10px;border:1px solid var(--gold);border-radius:7px;background:#1a0c0c;color:var(--gold);font-size:13px;font-weight:700;letter-spacing:.08em;visibility:hidden}
 #controls{position:absolute;left:0;right:0;bottom:24px;z-index:5;display:flex;justify-content:center;gap:8px;visibility:hidden}
 #controls button{width:44px;height:38px;border-radius:8px;border:1px solid var(--gold);background:#1a0c0c;color:var(--cream);font-size:17px;cursor:pointer}
 #stage.awake{cursor:default}
 #stage.awake #controls,#stage.awake #counter{visibility:visible}
 @media (max-width:700px){
-  #countdown{font-size:14px;padding:6px 8px;left:10px;top:10px}
+  #countdown{font-size:13px;padding:0 8px;right:10px;top:10px;left:auto;width:auto;max-width:calc(100% - 20px);height:40px}
+  #counter{right:10px;top:58px}
   #controls{bottom:14px}
   #controls button{width:40px;height:36px}
 }
